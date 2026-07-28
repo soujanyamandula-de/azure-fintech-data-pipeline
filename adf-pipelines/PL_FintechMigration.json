@@ -1,0 +1,253 @@
+{
+    "name": "FintechProjectPipeline",
+    "properties": {
+        "activities": [
+            {
+                "name": "GetTableList",
+                "type": "Lookup",
+                "dependsOn": [],
+                "policy": {
+                    "timeout": "0.12:00:00",
+                    "retry": 0,
+                    "retryIntervalInSeconds": 30,
+                    "secureOutput": false,
+                    "secureInput": false
+                },
+                "userProperties": [],
+                "typeProperties": {
+                    "source": {
+                        "type": "AzureSqlSource",
+                        "sqlReaderQuery": "SELECT \n    TABLE_SCHEMA AS SchemaName,\n    TABLE_NAME AS TableName\nFROM \n    INFORMATION_SCHEMA.TABLES\nWHERE \n    TABLE_TYPE = 'BASE TABLE' and TABLE_SCHEMA = 'fintech'\nORDER BY \n    SchemaName, TableName;",
+                        "queryTimeout": "02:00:00",
+                        "partitionOption": "None"
+                    },
+                    "dataset": {
+                        "referenceName": "Fintech_SQL_DS",
+                        "type": "DatasetReference"
+                    },
+                    "firstRowOnly": false
+                }
+            },
+            {
+                "name": "IterateOnEachTable",
+                "type": "ForEach",
+                "dependsOn": [
+                    {
+                        "activity": "GetTableList",
+                        "dependencyConditions": [
+                            "Succeeded"
+                        ]
+                    }
+                ],
+                "userProperties": [],
+                "typeProperties": {
+                    "items": {
+                        "value": "@activity('GetTableList').output.value",
+                        "type": "Expression"
+                    },
+                    "activities": [
+                        {
+                            "name": "SQLDBToBronzeLayerCopy",
+                            "type": "Copy",
+                            "dependsOn": [],
+                            "policy": {
+                                "timeout": "0.12:00:00",
+                                "retry": 0,
+                                "retryIntervalInSeconds": 30,
+                                "secureOutput": false,
+                                "secureInput": false
+                            },
+                            "userProperties": [],
+                            "typeProperties": {
+                                "source": {
+                                    "type": "AzureSqlSource",
+                                    "sqlReaderQuery": {
+                                        "value": "@concat('Select * from ', item().SchemaName,'.',item().TableName)",
+                                        "type": "Expression"
+                                    },
+                                    "queryTimeout": "02:00:00",
+                                    "partitionOption": "None"
+                                },
+                                "sink": {
+                                    "type": "ParquetSink",
+                                    "storeSettings": {
+                                        "type": "AzureBlobFSWriteSettings"
+                                    },
+                                    "formatSettings": {
+                                        "type": "ParquetWriteSettings"
+                                    }
+                                },
+                                "enableStaging": false,
+                                "translator": {
+                                    "type": "TabularTranslator",
+                                    "typeConversion": true,
+                                    "typeConversionSettings": {
+                                        "allowDataTruncation": true,
+                                        "treatBooleanAsNumber": false
+                                    }
+                                }
+                            },
+                            "inputs": [
+                                {
+                                    "referenceName": "Fintech_SQL_DS",
+                                    "type": "DatasetReference"
+                                }
+                            ],
+                            "outputs": [
+                                {
+                                    "referenceName": "Fintech_BronzeLayer_Target",
+                                    "type": "DatasetReference",
+                                    "parameters": {
+                                        "tableName": {
+                                            "value": "@item().TableName",
+                                            "type": "Expression"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    ]
+                }
+            },
+            {
+                "name": "BronzeToSilverLayerProcessing",
+                "type": "DatabricksNotebook",
+                "dependsOn": [
+                    {
+                        "activity": "IterateOnEachTable",
+                        "dependencyConditions": [
+                            "Succeeded"
+                        ]
+                    }
+                ],
+                "policy": {
+                    "timeout": "0.12:00:00",
+                    "retry": 0,
+                    "retryIntervalInSeconds": 30,
+                    "secureOutput": false,
+                    "secureInput": false
+                },
+                "userProperties": [],
+                "typeProperties": {
+                    "notebookPath": "/fintech-project/01_bronze_to_silver_N"
+                },
+                "linkedServiceName": {
+                    "referenceName": "AzureDatabricks_LS",
+                    "type": "LinkedServiceReference"
+                }
+            },
+            {
+                "name": "SilverToGoldProcessing",
+                "type": "DatabricksNotebook",
+                "dependsOn": [
+                    {
+                        "activity": "BronzeToSilverLayerProcessing",
+                        "dependencyConditions": [
+                            "Succeeded"
+                        ]
+                    }
+                ],
+                "policy": {
+                    "timeout": "0.12:00:00",
+                    "retry": 0,
+                    "retryIntervalInSeconds": 30,
+                    "secureOutput": false,
+                    "secureInput": false
+                },
+                "userProperties": [],
+                "typeProperties": {
+                    "notebookPath": "/fintech-project/02_silver_to_gold"
+                },
+                "linkedServiceName": {
+                    "referenceName": "AzureDatabricks_LS",
+                    "type": "LinkedServiceReference"
+                }
+            },
+            {
+                "name": "SuccessEmail",
+                "type": "WebActivity",
+                "dependsOn": [
+                    {
+                        "activity": "SilverToGoldProcessing",
+                        "dependencyConditions": [
+                            "Succeeded"
+                        ]
+                    }
+                ],
+                "policy": {
+                    "timeout": "0.12:00:00",
+                    "retry": 0,
+                    "retryIntervalInSeconds": 30,
+                    "secureOutput": false,
+                    "secureInput": false
+                },
+                "userProperties": [],
+                "typeProperties": {
+                    "method": "POST",
+                    "headers": {
+                        "Content-Type": "application/json"
+                    },
+                    "url": "https://prod-08.mexicocentral.logic.azure.com:443/workflows/61b5214126d7401da3b2a2d28d270527/triggers/When_an_HTTP_request_is_received/paths/invoke?api-version=2016-10-01&sp=%2Ftriggers%2FWhen_an_HTTP_request_is_received%2Frun&sv=1.0&sig=CQ47YKdP_6rDyZ1XYMwU1DarvxTHwsK1DQDyH5CeJtQ",
+                    "body": {
+                        "value": "{\n    \"to\": \"@{pipeline().parameters.to}\",\n    \"subject\": \"@{pipeline().parameters.subjectForSucess}\",\n    \"emailmsg\": \"@{pipeline().parameters.emailMsgSucess}\"\n}",
+                        "type": "Expression"
+                    }
+                }
+            },
+            {
+                "name": "FailureEmail",
+                "type": "WebActivity",
+                "dependsOn": [
+                    {
+                        "activity": "SilverToGoldProcessing",
+                        "dependencyConditions": [
+                            "Failed"
+                        ]
+                    }
+                ],
+                "policy": {
+                    "timeout": "0.12:00:00",
+                    "retry": 0,
+                    "retryIntervalInSeconds": 30,
+                    "secureOutput": false,
+                    "secureInput": false
+                },
+                "userProperties": [],
+                "typeProperties": {
+                    "method": "POST",
+                    "headers": {
+                        "Content-Type": "application/json"
+                    },
+                    "url": "https://prod-08.mexicocentral.logic.azure.com:443/workflows/61b5214126d7401da3b2a2d28d270527/triggers/When_an_HTTP_request_is_received/paths/invoke?api-version=2016-10-01&sp=%2Ftriggers%2FWhen_an_HTTP_request_is_received%2Frun&sv=1.0&sig=CQ47YKdP_6rDyZ1XYMwU1DarvxTHwsK1DQDyH5CeJtQ",
+                    "body": {
+                        "value": "{\n    \"to\": \"@{pipeline().parameters.to}\",\n    \"subject\": \"@{pipeline().parameters.subjectForFailure}\",\n    \"emailmsg\": \"@{pipeline().parameters.emailMsgFailure}\"\n}",
+                        "type": "Expression"
+                    }
+                }
+            }
+        ],
+        "parameters": {
+            "to": {
+                "type": "string",
+                "defaultValue": "soujanyamandula@gmail.com"
+            },
+            "subjectForSucess": {
+                "type": "string",
+                "defaultValue": "Fintech Data Pipeline Execution -SUCESS"
+            },
+            "emailMsgSucess": {
+                "type": "string",
+                "defaultValue": "Today's execution for Fintech Data Pipeline Execution -SUCESSFUL"
+            },
+            "subjectForFailure": {
+                "type": "string",
+                "defaultValue": "Fintech Data Pipeline Execution - FAILURE"
+            },
+            "emailMsgFailure": {
+                "type": "string",
+                "defaultValue": "Today's execution for Fintech Data Pipeline Execution -FAILED"
+            }
+        },
+        "annotations": []
+    }
+}
