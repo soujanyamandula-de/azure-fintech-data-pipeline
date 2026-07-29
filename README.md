@@ -45,6 +45,8 @@ Credentials (SQL Database access) are managed centrally via **Azure Key Vault**,
 
 ## Pipeline Stages
 
+<img width="1182" height="285" alt="image" src="https://github.com/user-attachments/assets/07402d6b-2b09-408a-bf7c-864110af6959" />
+
 ### 1. Bronze — Raw Ingestion
 An ADF pipeline dynamically discovers all tables in the source database (via `INFORMATION_SCHEMA.TABLES`) and copies each one into ADLS Gen2 as-is, using a parameterized `ForEach` loop — no hardcoded table list, so new source tables are picked up automatically.
 
