@@ -27,6 +27,7 @@ ADLS Gen2 — Gold Layer (star schema, analytics-ready)
         ▼
 Email Notification (pipeline success / failure)
 ```
+<img width="1536" height="1024" alt="image" src="https://github.com/user-attachments/assets/1db4aa2c-3be8-47a3-a00e-97e1425d4ce3" />
 
 Credentials (SQL Database access) are managed centrally via **Azure Key Vault**, accessed through a Databricks Key Vault-backed secret scope — no credentials are stored in code.
 
